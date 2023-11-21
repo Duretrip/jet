@@ -1,0 +1,114 @@
+name: Build and Deploy to GKE
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+  workflow_dispatch:
+
+jobs:
+
+  create-image-and-push-to-dockerhub:
+
+    name: Create Image and Push to Dockerhub
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/dev'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Set up Docker Compose
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker-compose
+        continue-on-error: true
+      
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Log in to Docker Hub
+        run: |
+          docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_TOKEN }}
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+      
+      - name: Replace placeholders Image in YML script
+        run: |
+          sed -i "s|image: duretrip/jet:latest|image: duretrip/jet:${{ github.sha }}|" services/jet/docker-compose.yaml
+
+      - name: Build Docker images
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+        run: |
+          docker-compose -f services/jet/docker-compose.yaml build
+          docker-compose -f services/jet/docker-compose.yaml push
+        working-directory: .
+
+
+  setup-and-deploy-to-cluster-main:
+    needs: [create-image-and-push-to-dockerhub]
+
+    name: Setup and Deploy
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/dev'
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    env:
+      RABBITMQ_USERNAME: ${{ secrets.RABBITMQ_USERNAME }}
+      RABBITMQ_PASSWORD: ${{ secrets.RABBITMQ_PASSWORD }}
+      RABBITMQ_HOST: ${{ secrets.RABBITMQ_HOST }}
+      RABBITMQ_PORT: ${{ secrets.RABBITMQ_PORT }}
+      JET_DB_USER: ${{ secrets.JET_DB_USER }}
+      JET_DB_PASS: ${{ secrets.JET_DB_PASS }}
+      JET_DB_NAME: ${{ secrets.JET_DB_NAME }}
+      JET_DB_HOST: ${{ secrets.JET_DB_HOST }}
+      JET_DB_PORT: ${{ secrets.JET_DB_PORT }}
+      JET_DB_TYPE: ${{ secrets.JET_DB_TYPE }}
+      APP_PORT: ${{ secrets.APP_PORT }}
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v1
+      with:
+        credentials_json: ${{ secrets.GKE_SA }}
+    - name: Get GKE Credentials
+      uses: google-github-actions/get-gke-credentials@v1
+      with:
+        cluster_name: ${{ secrets.GKE_DEV_CLUSTER_NAME }}
+        location: ${{ secrets.GKE_DEV_CLUSTER_ZONE }}
+      env:
+        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+
+    - name: Replace placeholders in YML script
+      run: |
+        sed -i "s/{{RABBITMQ_USERNAME}}/${RABBITMQ_USERNAME}/g" k8s/jet.yml
+        sed -i "s/{{RABBITMQ_PASSWORD}}/${RABBITMQ_PASSWORD}/g" k8s/jet.yml
+        sed -i "s/{{RABBITMQ_HOST}}/${RABBITMQ_HOST}/g" k8s/jet.yml
+        sed -i "s/{{RABBITMQ_PORT}}/${RABBITMQ_PORT}/g" k8s/jet.yml
+        sed -i "s/{{JET_DB_USER}}/${JET_DB_USER}/g" k8s/jet.yml
+        sed -i "s/{{JET_DB_PASS}}/${JET_DB_PASS}/g" k8s/jet.yml
+        sed -i "s/{{JET_DB_NAME}}/${JET_DB_NAME}/g" k8s/jet.yml
+        sed -i "s/{{JET_DB_HOST}}/${JET_DB_HOST}/g" k8s/jet.yml
+        sed -i "s/{{JET_DB_PORT}}/${JET_DB_PORT}/g" k8s/jet.yml
+        sed -i "s/{{JET_DB_TYPE}}/${JET_DB_TYPE}/g" k8s/jet.yml
+        sed -i "s/{{APP_PORT}}/${APP_PORT}/g" k8s/jet.yml
+
+    - name: Replace placeholders Image in YML script
+      run: |
+        sed -i "s|image: duretrip/jet:latest|image: duretrip/jet:${{ github.sha }}|" k8s/jet.yml
+
+    - name: Deploy on the GKE
+      env:
+        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+        CT_TYPE: "api"
+      run: |-
+        kubectl apply -f k8s/jet.yml
+    
+       

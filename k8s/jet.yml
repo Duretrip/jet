@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jet-app
+  labels:
+    app: jet-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jet-app
+  template:
+    metadata:
+      labels:
+        app: jet-app
+    spec:
+      containers:
+        - name: jet-app
+          image: duretrip/jet:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8008
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "0.2"
+            limits:
+              memory: "512Mi"
+              cpu: "0.5"
+          env:
+            - name: JET_DATABASE_URL  # Setting Database name from configMap
+              value: "{{JET_DB_TYPE}}://{{JET_DB_USER}}:{{JET_DB_PASS}}@{{JET_DB_HOST}}:{{JET_DB_PORT}}/{{JET_DB_NAME}}"
+
+            - name: RABBITMQ_CONECTION_URL
+              value: "amqp://{{RABBITMQ_USERNAME}}:{{RABBITMQ_PASSWORD}}@{{RABBITMQ_HOST}}:{{RABBITMQ_PORT}}"
+
+            - name: RABBITMQ_JET_QUEUE
+              value: jet-queue
+
+            - name: RABBITMQ_API_GATEWAY_QUEUE
+              value: api-gateway-queue
+
+            - name: RABBITMQ_AUTH_QUEUE
+              value: auth-queue
+
+            - name: RABBITMQ_MAILER_QUEUE
+              value: email-queue
+
+            - name: APP_PORT
+              value: "{{APP_PORT}}"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jet-svc
+spec:
+  selector:
+    app: jet-app
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8008
+      targetPort: 8008
+      protocol: TCP
