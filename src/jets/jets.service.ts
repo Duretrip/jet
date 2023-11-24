@@ -141,6 +141,7 @@ export class JetsService {
         priceDescription: true,
         createdAt: true,
         updatedAt: true,
+        pictures: true,
         facilities: {
           select: {
             facility: {
